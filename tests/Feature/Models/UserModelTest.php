@@ -44,4 +44,20 @@ class UserModelTest extends TestCase
         $this->assertTrue($socialAccount->user->is($user));
         $this->assertTrue($user->socialAccounts->contains($socialAccount));
     }
+
+    public function test_user_profile_attributes_are_cast_and_soft_deletable(): void
+    {
+        $user = User::factory()->create([
+            'portfolio_slug' => 'milan-maker',
+            'social_links' => ['github' => 'milantetar'],
+            'is_public' => false,
+        ]);
+
+        $this->assertSame(['github' => 'milantetar'], $user->social_links);
+        $this->assertFalse($user->is_public);
+
+        $user->delete();
+
+        $this->assertSoftDeleted($user);
+    }
 }

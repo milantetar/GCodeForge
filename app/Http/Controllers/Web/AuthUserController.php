@@ -9,6 +9,8 @@ use App\Models\User;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
+use Inertia\Inertia;
+use Inertia\Response;
 use Laravel\Socialite\Facades\Socialite;
 use Spatie\Permission\Models\Role;
 use Symfony\Component\HttpFoundation\RedirectResponse as SymfonyRedirectResponse;
@@ -16,6 +18,22 @@ use Throwable;
 
 class AuthUserController extends Controller
 {
+    /**
+     * Display Registration Page
+     */
+    public function create(): Response
+    {
+        return Inertia::render(('auth/register'));
+    }
+
+    /**
+     * Display Login Page
+     */
+    public function login(): Response
+    {
+        return Inertia::render(('auth/login'));
+    }
+
     /**
      * @var list<string>
      */

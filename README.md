@@ -63,15 +63,17 @@ and administrative access control.
 | --- | --- | --- |
 | Welcome and marketing UI | Complete | Responsive dark Forge design with motion and reduced-motion support |
 | Email/password authentication | Complete | Registration, login, logout, password reset, and confirmation |
-| Email verification | Complete | Verified users are required for protected workspace routes |
+| Email verification | Complete | Branded queued mail, expiring signed links, resend throttling, and web/API verification flows |
 | Social authentication | Backend ready | Google and GitHub require credentials in the environment |
 | Two-factor authentication | Complete | TOTP QR setup, confirmation, recovery codes, challenge, and disable flow |
 | Profile and password settings | Complete | Powered by Laravel Fortify |
 | RBAC foundation | Complete | `user`, `admin`, and `super-admin` roles with seeded permissions |
-| Sanctum API authentication | Foundation ready | Authenticated `/api/user` route exists; versioned auth endpoints are pending |
-| Converter engines | Planned | Algorithms are specified below and should be ported into tested domain services |
-| Conversion persistence and history | Planned | Recommended schema and workflow are described below |
-| Queued conversion execution | Planned | Database queue infrastructure is already available |
+| Sanctum API authentication | Complete | Versioned registration, login, profile, logout, and email-verification endpoints |
+| CMS-managed pages | Complete | Draft/publish workflow, revisions, cached public content, React renderer, and RBAC admin editor |
+| Converter engines | Complete | Pattern Repeater, Hexagonal Flat, and Two Axis deterministic PHP domain services |
+| Conversion persistence and history | Complete | Owned projects, private files, checksums, status, metrics, and downloads |
+| Queued conversion execution | Complete | Explicit async mode and configurable size threshold with retries and timestamps |
+| Machine profiles | Complete | Per-user machine defaults merged with request-specific converter options |
 
 ## The three converters
 
@@ -289,7 +291,7 @@ copy 2 -> B8.160000
 copy 3 -> B16.320000
 ```
 
-## Recommended converter architecture
+## Converter architecture
 
 Converter logic should not live in React components or controllers. A clean
 Laravel implementation can use the following boundaries:
@@ -314,16 +316,17 @@ ConversionResult DTO
         +--> queued persistence for large inputs
 ```
 
-Suggested application classes:
+Implemented application classes:
 
 ```text
 app/Domain/GCode/
 ├── Contracts/GCodeConverter.php
 ├── Data/ConversionResult.php
-├── Data/ParsedCommand.php
+├── Data/ConversionSubmission.php
 ├── Exceptions/InvalidGCode.php
 ├── Parsing/GCodeTokenizer.php
-├── Validation/ProgramValidator.php
+├── Support/DecimalNumber.php
+├── Support/GCodeLine.php
 └── Converters/
     ├── PatternRepeaterConverter.php
     ├── HexagonalFlatConverter.php
@@ -391,6 +394,7 @@ The web application currently supports:
 - login throttling by email and IP address;
 - forgotten-password email and password reset;
 - verified-email enforcement for protected routes;
+- queued verification mail with expiring signed links and throttled resend;
 - password confirmation for sensitive actions;
 - Google and GitHub OAuth account linking;
 - TOTP two-factor setup, confirmation, recovery codes, and login challenge;
@@ -417,6 +421,10 @@ users.delete
 roles.view
 roles.manage
 activity.view
+cms.view
+cms.manage
+cms.publish
+projects.manage
 ```
 
 New registrations receive the `user` role automatically. Seed roles and
@@ -447,20 +455,16 @@ Existing migrations provide:
 | `activity_log` | Planned security and conversion audit history |
 | `features` | Pennant feature flags |
 | Telescope tables | Local debugging and request inspection |
+| `cms_pages` | Page metadata, publication state, SEO, and settings |
+| `cms_sections` | Ordered reusable content blocks rendered by React |
+| `cms_page_revisions` | Immutable page snapshots for editorial history |
+| `machine_profiles` | User-owned units and reusable converter/machine defaults |
+| `projects` | Owned workspaces, lifecycle state, settings, and activity time |
+| `conversions` | Type, options, SHA-256 hash, status, warnings, metrics, and timestamps |
+| `conversion_files` | Private input/output metadata, checksums, MIME type, and size |
 
-Recommended converter persistence for the next phase:
-
-```text
-projects
-conversions
-conversion_files
-machine_profiles
-```
-
-A `conversions` record should include the owner/project, converter type, options
-JSON, input and output storage paths, SHA-256 input hash, status, warnings, error
-details, processing duration, and timestamps. Large G-code should be stored in
-private object/file storage rather than a database `LONGTEXT` column.
+G-code contents are stored on the configured private filesystem disk rather than
+in MySQL. Database records contain searchable metadata and integrity hashes.
 
 ## Installation
 
@@ -520,12 +524,16 @@ DB_USERNAME=root
 DB_PASSWORD=
 ```
 
-### 5. Run migrations and seed RBAC
+### 5. Run migrations and seed application data
 
 ```bash
-php artisan migrate
-php artisan db:seed --class=RolePermissionSeeder
+php artisan migrate --seed
 ```
+
+In `local` environments the seeder creates `test@example.com` and
+`admin@example.com`, both with the password `password`. The admin account can
+open `/admin/cms/pages`. These development-only credentials are never seeded
+outside the local environment.
 
 ### 6. Start development services
 
@@ -566,6 +574,20 @@ QUEUE_CONNECTION=database
 SESSION_DRIVER=database
 ```
 
+### G-code processing
+
+```dotenv
+GCODE_DISK=local
+GCODE_CONVERTER_VERSION=1
+GCODE_MAX_INPUT_BYTES=2097152
+GCODE_MAX_REPETITIONS=1000
+GCODE_QUEUE_THRESHOLD_BYTES=262144
+GCODE_RESULT_CACHE_SECONDS=900
+```
+
+The `local` disk is private (`storage/app/private`). Increment the converter
+version whenever an algorithm changes so cached results cannot cross versions.
+
 ### Mail
 
 The default local configuration writes mail to the log. For real verification
@@ -577,10 +599,15 @@ MAIL_HOST=your-mail-host
 MAIL_PORT=587
 MAIL_USERNAME=your-username
 MAIL_PASSWORD=your-password
-MAIL_ENCRYPTION=tls
+MAIL_SCHEME=smtp
 MAIL_FROM_ADDRESS="no-reply@example.com"
 MAIL_FROM_NAME="${APP_NAME}"
+AUTH_EMAIL_VERIFICATION_EXPIRE=60
 ```
+
+Verification notifications implement `ShouldQueue`. Keep a queue worker running
+locally and in production; with `MAIL_MAILER=log`, inspect `storage/logs` after
+the worker processes the notification.
 
 ### Google OAuth
 
@@ -629,20 +656,64 @@ composer run types:check
 php artisan test
 ```
 
-## API direction
+## API
 
 The application uses the same Laravel codebase for web and API consumers. Web
 pages use cookie-based Inertia sessions; external clients should use Sanctum
 tokens with scoped abilities.
 
-The only current API route is:
+Authentication and verification endpoints:
 
 ```http
-GET /api/user
-Authorization: Bearer <token>
+POST /api/v1/register
+POST /api/v1/login
+GET  /api/v1/auth/me
+POST /api/v1/auth/logout
+GET  /api/v1/email/verification-status
+POST /api/v1/email/verification-notification
+GET  /api/v1/email/verify/{id}/{hash}?expires=...&signature=...
 ```
 
-Recommended versioned converter endpoints for the next phase:
+Registration returns a Sanctum Bearer token and queues a verification email.
+Send the token in `Authorization: Bearer <token>`. The resend and status routes
+require that token; the link in the email is protected by an expiring Laravel
+signature. Protected product and CMS routes also apply the `verified`
+middleware.
+
+CMS content endpoints:
+
+```http
+GET    /api/v1/content/pages/{slug}
+GET    /api/v1/cms/pages
+POST   /api/v1/cms/pages
+GET    /api/v1/cms/pages/{cmsPage}
+PUT    /api/v1/cms/pages/{cmsPage}
+DELETE /api/v1/cms/pages/{cmsPage}
+POST   /api/v1/cms/pages/{cmsPage}/publish
+```
+
+The public content endpoint returns only published pages and visible sections.
+CMS management requires a verified Sanctum user with `cms.manage`; publishing
+also requires `cms.publish`.
+
+Project and machine-profile endpoints:
+
+```http
+GET    /api/v1/projects
+POST   /api/v1/projects
+GET    /api/v1/projects/{project}
+PUT    /api/v1/projects/{project}
+DELETE /api/v1/projects/{project}
+GET    /api/v1/projects/{project}/conversions
+
+GET    /api/v1/machine-profiles
+POST   /api/v1/machine-profiles
+GET    /api/v1/machine-profiles/{machineProfile}
+PUT    /api/v1/machine-profiles/{machineProfile}
+DELETE /api/v1/machine-profiles/{machineProfile}
+```
+
+Converter endpoints:
 
 ```http
 POST /api/v1/conversions/pattern-repeater
@@ -656,7 +727,10 @@ Example request:
 
 ```json
 {
+    "project_id": 1,
     "gcode": "G1 F10000\nM3\n...",
+    "source_filename": "source.nc",
+    "async": false,
     "options": {
         "repetitions": 3,
         "y_distance": 5.715
@@ -669,22 +743,20 @@ Example synchronous response:
 ```json
 {
     "data": {
-        "type": "pattern-repeater",
-        "status": "completed",
-        "output": "G1 F10000\nM3\n...",
-        "warnings": [],
-        "meta": {
-            "input_lines": 128,
-            "output_lines": 382,
-            "duration_ms": 14
-        }
+        "conversion": {
+            "id": "01K...",
+            "type": "pattern-repeater",
+            "status": "completed",
+            "download_url": "https://example.com/api/v1/conversions/01K.../download"
+        },
+        "output": "G1 F10000\nM3\n..."
     }
 }
 ```
 
-Use `202 Accepted` with a conversion identifier when work is queued. API errors
-should use a consistent JSON shape and must never expose raw exceptions or
-machine credentials.
+Set `async` to `true`, or exceed `GCODE_QUEUE_THRESHOLD_BYTES`, to receive
+`202 Accepted`. Synchronous conversions return `201 Created` with output. Inputs and
+downloads are ownership-protected; archived projects reject new conversions.
 
 ## Caching and queues
 
@@ -693,7 +765,7 @@ machine credentials.
 Cache only deterministic conversion results. A safe cache key is derived from:
 
 ```text
-SHA-256(converter version + converter type + normalized input + canonical options)
+SHA-256(user + converter version + converter type + input hash + canonical options)
 ```
 
 Include a converter version so algorithm changes never return stale output. Use
@@ -708,13 +780,10 @@ role, and tenant scope.
 Small conversions may run synchronously. Queue work when input size, repetition
 count, preview generation, or file export exceeds an agreed threshold.
 
-Recommended jobs:
+Implemented conversion job:
 
 ```text
 ProcessGCodeConversion
-GenerateConversionPreview
-ExportConversionFile
-PruneExpiredConversionFiles
 ```
 
 Production workers should use retries, exponential backoff, timeouts, idempotency,
@@ -726,9 +795,13 @@ php artisan queue:work --tries=3 --backoff=5
 
 ## Testing and quality
 
-The current suite covers authentication page rendering, registration and default
-role assignment, suspended-account rejection, verified-email enforcement, model
-authorization capabilities, SocialAccount relations, and the welcome route.
+The current suite covers authentication page rendering, web and API registration,
+Sanctum login/logout, queued verification notifications, signed-link validation,
+resend behavior, default role assignment, suspended-account rejection,
+verified-email enforcement, CMS publication/cache/RBAC flows, model authorization
+capabilities, SocialAccount relations, public pages, all three converter
+algorithms, project/profile ownership, private storage, downloads, lifecycle
+rules, synchronous processing, and queue dispatch.
 
 Converter tests should use golden input/output fixtures:
 
@@ -777,13 +850,15 @@ gate.
 - [x] Google/GitHub account-linking backend
 - [x] TOTP two-factor authentication
 - [x] Roles, permissions, and super-admin override
-- [ ] Tokenized G-code parser and validation layer
-- [ ] Pattern Repeater service and API
-- [ ] Hexagonal Flat Converter service and API
-- [ ] Two Axis Converter service and API
-- [ ] Conversion projects, history, and private file storage
-- [ ] Queue thresholds, progress tracking, and cached results
-- [ ] Visual toolpath preview and machine profiles
+- [x] CMS pages, reusable sections, revisions, publication workflow, and admin UI
+- [x] G-code tokenizer, validation helpers, and decimal-safe coordinate layer
+- [x] Pattern Repeater service and API
+- [x] Hexagonal Flat Converter service and API
+- [x] Two Axis Converter service and API
+- [x] Conversion projects, history, and private file storage
+- [x] Queue thresholds, status tracking, retries, and cached results
+- [x] Machine-profile CRUD and converter defaults
+- [ ] Visual toolpath preview
 - [ ] Admin user/role management and activity viewer
 - [ ] Passkey registration and login UI
 - [ ] Comprehensive converter fixtures and property-based tests

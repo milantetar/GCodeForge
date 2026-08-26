@@ -47,4 +47,26 @@ class RegisterUserRequest extends FormRequest
             ],
         ];
     }
+
+    /**
+     * Return the verified registration payload with a concrete application type.
+     *
+     * @return array{name: string, email: string, password: string}
+     */
+    public function registrationData(): array
+    {
+        $validated = $this->validated();
+
+        if (! is_string($validated['name'] ?? null)
+            || ! is_string($validated['email'] ?? null)
+            || ! is_string($validated['password'] ?? null)) {
+            throw new \LogicException('The registration request contains an invalid payload.');
+        }
+
+        return [
+            'name' => $validated['name'],
+            'email' => $validated['email'],
+            'password' => $validated['password'],
+        ];
+    }
 }

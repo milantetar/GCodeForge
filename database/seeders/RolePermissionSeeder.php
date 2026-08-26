@@ -26,6 +26,10 @@ class RolePermissionSeeder extends Seeder
             'roles.view',
             'roles.manage',
             'activity.view',
+            'cms.view',
+            'cms.manage',
+            'cms.publish',
+            'projects.manage',
         ];
 
         foreach ($permissions as $permission) {
@@ -45,6 +49,10 @@ class RolePermissionSeeder extends Seeder
             'users.suspend',
             'roles.view',
             'activity.view',
+            'cms.view',
+            'cms.manage',
+            'cms.publish',
+            'projects.manage',
         ]);
 
         Role::findOrCreate('super-admin', 'web');

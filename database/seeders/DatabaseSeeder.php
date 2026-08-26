@@ -16,6 +16,7 @@ class DatabaseSeeder extends Seeder
     public function run(): void
     {
         $this->call(RolePermissionSeeder::class);
+        $this->call(CmsPageSeeder::class);
 
         if (app()->isLocal()) {
             $user = User::query()->firstOrCreate(
@@ -28,6 +29,17 @@ class DatabaseSeeder extends Seeder
             );
 
             $user->syncRoles(['user']);
+
+            $admin = User::query()->firstOrCreate(
+                ['email' => 'admin@example.com'],
+                [
+                    'name' => 'Local Administrator',
+                    'password' => 'password',
+                    'email_verified_at' => now(),
+                ],
+            );
+
+            $admin->syncRoles(['admin']);
         }
     }
 }

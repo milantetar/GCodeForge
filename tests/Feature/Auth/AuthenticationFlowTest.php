@@ -4,8 +4,10 @@ namespace Tests\Feature\Auth;
 
 use App\Enums\UserStatus;
 use App\Models\User;
+use App\Notifications\VerifyEmailNotification;
 use Database\Seeders\RolePermissionSeeder;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\Notification;
 use Inertia\Testing\AssertableInertia as Assert;
 use Tests\TestCase;
 
@@ -30,6 +32,7 @@ class AuthenticationFlowTest extends TestCase
 
     public function test_a_new_account_is_created_with_the_user_role(): void
     {
+        Notification::fake();
         $this->seed(RolePermissionSeeder::class);
 
         $response = $this->post('/register', [
@@ -45,6 +48,7 @@ class AuthenticationFlowTest extends TestCase
         $response->assertRedirect('/dashboard');
         $this->assertAuthenticatedAs($user);
         $this->assertTrue($user->hasRole('user'));
+        Notification::assertSentTo($user, VerifyEmailNotification::class);
     }
 
     public function test_a_suspended_account_cannot_sign_in(): void

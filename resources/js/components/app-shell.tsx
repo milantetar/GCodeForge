@@ -1,6 +1,7 @@
 import { Link, router, usePage } from '@inertiajs/react';
 import {
     Bell,
+    FileText,
     LayoutDashboard,
     LogOut,
     Menu,
@@ -18,7 +19,7 @@ import type { Auth } from '@/types';
 
 type AppShellProps = PropsWithChildren<{ title: string; actions?: ReactNode }>;
 
-const links = [
+const baseLinks = [
     { href: '/dashboard', label: 'Workspace', icon: LayoutDashboard },
     { href: '/settings/profile', label: 'Profile', icon: Settings },
     { href: '/settings/security', label: 'Security', icon: Shield },
@@ -27,6 +28,16 @@ const links = [
 export function AppShell({ title, actions, children }: AppShellProps) {
     const { auth } = usePage<{ auth: Auth }>().props;
     const [mobileOpen, setMobileOpen] = useState(false);
+    const links = auth.permissions.includes('cms.view')
+        ? [
+              ...baseLinks,
+              {
+                  href: '/admin/cms/pages',
+                  label: 'Content',
+                  icon: FileText,
+              },
+          ]
+        : baseLinks;
 
     const nav = (
         <>
