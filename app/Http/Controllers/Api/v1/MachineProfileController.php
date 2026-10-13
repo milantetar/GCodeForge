@@ -51,7 +51,7 @@ class MachineProfileController extends BaseController
     public function destroy(Request $request, MachineProfile $machineProfile): JsonResponse
     {
         Gate::forUser($this->user($request))->authorize('delete', $machineProfile);
-        $machineProfile->delete();
+        $this->profileService->delete($machineProfile);
 
         return $this->successResponse('Machine profile deleted.');
     }

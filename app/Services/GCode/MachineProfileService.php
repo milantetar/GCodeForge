@@ -6,7 +6,7 @@ use App\Models\MachineProfile;
 use App\Models\User;
 use App\Repositories\GCode\MachineProfileRepository;
 use App\Services\CoreService;
-use Illuminate\Contracts\Pagination\LengthAwarePaginator;
+use Illuminate\Pagination\LengthAwarePaginator;
 use Illuminate\Support\Str;
 
 /** @extends CoreService<MachineProfile, MachineProfileRepository> */
@@ -31,6 +31,7 @@ class MachineProfileService extends CoreService
     public function create(User $user, array $data): MachineProfile
     {
         return $this->transaction(function () use ($user, $data): MachineProfile {
+            User::query()->whereKey($user->id)->lockForUpdate()->firstOrFail();
             $makeDefault = (bool) ($data['is_default'] ?? false)
                 || ! $this->profileRepository->query()->where('user_id', $user->id)->exists();
 
@@ -54,6 +55,7 @@ class MachineProfileService extends CoreService
     public function update(MachineProfile $profile, array $data): MachineProfile
     {
         return $this->transaction(function () use ($profile, $data): MachineProfile {
+            User::query()->whereKey($profile->user_id)->lockForUpdate()->firstOrFail();
             if (($data['is_default'] ?? false) === true) {
                 $this->clearDefault($profile->user);
             }
@@ -86,7 +88,7 @@ class MachineProfileService extends CoreService
         $slug = $base;
         $suffix = 2;
 
-        while ($this->profileRepository->query()
+        while ($this->profileRepository->query()->withTrashed()
             ->where('user_id', $user->id)
             ->where('slug', $slug)
             ->when($ignoreId !== null, fn ($query) => $query->whereKeyNot($ignoreId))
@@ -95,5 +97,18 @@ class MachineProfileService extends CoreService
         }
 
         return $slug;
+    }
+
+    public function delete(MachineProfile $profile): void
+    {
+        $this->transaction(function () use ($profile): void {
+            User::query()->whereKey($profile->user_id)->lockForUpdate()->firstOrFail();
+            $profile->projects()->update(['machine_profile_id' => null]);
+            $profile->delete();
+            if ($profile->is_default) {
+                $next = MachineProfile::query()->where('user_id', $profile->user_id)->oldest('id')->first();
+                $next?->update(['is_default' => true]);
+            }
+        });
     }
 }

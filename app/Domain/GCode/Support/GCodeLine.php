@@ -11,7 +11,7 @@ final class GCodeLine
         $command = explode(';', $line, 2)[0];
         $command = (string) preg_replace('/\([^)]*\)/', '', $command);
 
-        if (! preg_match('/(?<![A-Z0-9_])'.preg_quote($axis, '/').'\s*('.self::NUMBER.')/i', $command, $matches)) {
+        if (! preg_match('/'.preg_quote($axis, '/').'\s*('.self::NUMBER.')(?![.\d_+\-])/i', $command, $matches)) {
             return null;
         }
 
@@ -31,14 +31,14 @@ final class GCodeLine
 
     public static function startsWithZ4(string $line): bool
     {
-        return preg_match('/^Z\s*4(?:\.0+)?(?:\s|$)/i', trim($line)) === 1;
+        return preg_match('/^Z\s*4(?:\.0+)?(?=\s|[A-Z(;]|$)/i', trim($line)) === 1;
     }
 
     public static function replaceAxis(string $line, string $axis, string $value): string
     {
         [$command, $comment] = array_pad(explode(';', $line, 2), 2, null);
         $command = (string) preg_replace(
-            '/\([^)]*\)(*SKIP)(*F)|(?<![A-Z0-9_])'.preg_quote($axis, '/').'\s*'.self::NUMBER.'/i',
+            '/\([^)]*\)(*SKIP)(*F)|'.preg_quote($axis, '/').'\s*'.self::NUMBER.'(?![.\d_+\-])/i',
             strtoupper($axis).$value,
             $command,
         );

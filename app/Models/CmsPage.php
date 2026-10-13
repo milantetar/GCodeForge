@@ -23,6 +23,9 @@ use Illuminate\Support\Carbon;
  * @property Carbon|null $published_at
  * @property int|null $created_by
  * @property int|null $updated_by
+ * @property array<string, mixed>|null $published_content
+ * @property string|null $published_slug
+ * @property int $lock_version
  */
 #[Fillable([
     'title',
@@ -79,6 +82,8 @@ class CmsPage extends Model
             'status' => CmsPageStatus::class,
             'settings' => 'array',
             'published_at' => 'immutable_datetime',
+            'published_content' => 'array',
+            'lock_version' => 'integer',
         ];
     }
 }

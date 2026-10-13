@@ -2,7 +2,9 @@
 
 namespace App\Traits;
 
+use Illuminate\Contracts\Pagination\LengthAwarePaginator;
 use Illuminate\Http\JsonResponse;
+use Illuminate\Http\Resources\Json\ResourceCollection;
 
 trait ApiResponse
 {
@@ -17,6 +19,15 @@ trait ApiResponse
         int $statusCode = 200,
         array $meta = []
     ): JsonResponse {
+        if ($data instanceof ResourceCollection && $data->resource instanceof LengthAwarePaginator) {
+            $paginator = $data->resource;
+            $meta = [...$meta, 'pagination' => [
+                'current_page' => $paginator->currentPage(), 'last_page' => $paginator->lastPage(),
+                'per_page' => $paginator->perPage(), 'total' => $paginator->total(),
+                'next_page_url' => $paginator->nextPageUrl(), 'prev_page_url' => $paginator->previousPageUrl(),
+            ]];
+            $data = $data->resolve();
+        }
         $payload = [
             'success' => true,
             'message' => $message,

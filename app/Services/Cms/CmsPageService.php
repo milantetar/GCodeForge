@@ -3,6 +3,8 @@
 namespace App\Services\Cms;
 
 use App\Enums\CmsPageStatus;
+use App\Http\Resources\CmsPageResource;
+use App\Http\Resources\CmsSectionResource;
 use App\Models\CmsPage;
 use App\Models\User;
 use App\Repositories\Cms\CmsPageRepository;
@@ -10,11 +12,13 @@ use App\Services\CoreService;
 use Illuminate\Contracts\Pagination\LengthAwarePaginator;
 use Illuminate\Support\Arr;
 use Illuminate\Support\Facades\Cache;
+use Illuminate\Support\Facades\DB;
+use Illuminate\Validation\ValidationException;
 
 /** @extends CoreService<CmsPage, CmsPageRepository> */
 class CmsPageService extends CoreService
 {
-    private const CACHE_PREFIX = 'cms:published-page:';
+    private const CACHE_PREFIX = 'cms:published-page:v2:';
 
     public function __construct(
         protected CmsPageRepository $pageRepository,
@@ -49,6 +53,21 @@ class CmsPageService extends CoreService
         return $page;
     }
 
+    /** @return array<string, mixed>|null */
+    public function publishedContentBySlug(string $slug): ?array
+    {
+        return Cache::remember(self::CACHE_PREFIX.'content:'.$slug, now()->addMinutes(15), function () use ($slug): ?array {
+            $page = CmsPage::query()->with('sections')
+                ->where('status', CmsPageStatus::Published)
+                ->where('published_at', '<=', now())
+                ->where(fn ($query) => $query->where('published_slug', $slug)
+                    ->orWhere(fn ($legacy) => $legacy->whereNull('published_slug')->where('slug', $slug)))
+                ->first();
+
+            return $page === null ? null : ($page->published_content ?? $this->publicSnapshot($page));
+        });
+    }
+
     /**
      * @param  array<string, mixed>  $data
      */
@@ -57,13 +76,16 @@ class CmsPageService extends CoreService
         return $this->transaction(function () use ($data, $actor): CmsPage {
             /** @var CmsPage $page */
             $page = $this->pageRepository->create([
-                ...Arr::except($data, ['sections', 'change_note']),
+                ...Arr::except($data, ['sections', 'change_note', 'lock_version']),
                 'created_by' => $actor->id,
                 'updated_by' => $actor->id,
                 'published_at' => ($data['status'] ?? null) === CmsPageStatus::Published->value ? now() : null,
             ]);
 
             $this->syncSections($page, $data['sections'] ?? []);
+            if ($page->status === CmsPageStatus::Published) {
+                $this->capturePublication($page);
+            }
             $this->createRevision($page, $actor, $this->changeNote($data));
             $this->forgetPublishedPage($page->slug);
 
@@ -77,15 +99,20 @@ class CmsPageService extends CoreService
     public function update(CmsPage $page, array $data, User $actor): CmsPage
     {
         return $this->transaction(function () use ($page, $data, $actor): CmsPage {
-            $oldSlug = $page->slug;
-            $attributes = Arr::except($data, ['sections', 'change_note']);
-            $attributes['updated_by'] = $actor->id;
-
-            if (($data['status'] ?? null) !== CmsPageStatus::Published->value) {
-                $attributes['published_at'] = null;
+            $page = $this->lockedPage($page, $data['lock_version'] ?? null);
+            if (isset($data['slug']) && CmsPage::withTrashed()->whereKeyNot($page->id)
+                ->where(fn ($query) => $query->where('slug', $data['slug'])->orWhere('published_slug', $data['slug']))->exists()) {
+                throw ValidationException::withMessages(['slug' => 'This URL is reserved by another page. Choose another slug.']);
             }
-
+            // Freeze legacy live content before any draft edits.
+            if ($page->isPublished() && $page->published_content === null) {
+                $this->capturePublication($page);
+            }
+            $oldSlug = $page->slug;
+            $attributes = Arr::except($data, ['sections', 'change_note', 'lock_version', 'status']);
+            $attributes['updated_by'] = $actor->id;
             $this->pageRepository->update($page, $attributes);
+            $page->forceFill(['lock_version' => $page->lock_version + 1])->save();
             $this->syncSections($page, $data['sections'] ?? []);
             $this->createRevision($page, $actor, $this->changeNote($data));
             $this->forgetPublishedPage($oldSlug);
@@ -95,15 +122,21 @@ class CmsPageService extends CoreService
         });
     }
 
-    public function publish(CmsPage $page, User $actor): CmsPage
+    public function publish(CmsPage $page, User $actor, int $version): CmsPage
     {
-        return $this->transaction(function () use ($page, $actor): CmsPage {
+        return $this->transaction(function () use ($page, $actor, $version): CmsPage {
+            $page = $this->lockedPage($page, $version);
+            $this->forgetPublishedPage($page->published_slug ?? $page->slug);
+            if (CmsPage::query()->whereKeyNot($page->id)->where('published_slug', $page->slug)->exists()) {
+                throw ValidationException::withMessages(['slug' => 'This URL is already published by another page.']);
+            }
             $page->forceFill([
                 'status' => CmsPageStatus::Published,
                 'published_at' => now(),
                 'updated_by' => $actor->id,
+                'lock_version' => $page->lock_version + 1,
             ])->save();
-
+            $this->capturePublication($page);
             $this->createRevision($page, $actor, 'Published page');
             $this->forgetPublishedPage($page->slug);
 
@@ -116,6 +149,52 @@ class CmsPageService extends CoreService
         $slug = $page->slug;
         $this->pageRepository->delete($page);
         $this->forgetPublishedPage($slug);
+        $this->forgetPublishedPage($page->published_slug ?? $slug);
+    }
+
+    public function restoreRevision(CmsPage $page, int $revisionId, int $version, User $actor): CmsPage
+    {
+        return $this->transaction(function () use ($page, $revisionId, $version, $actor): CmsPage {
+            $page = $this->lockedPage($page, $version);
+            $revision = $page->revisions()->findOrFail($revisionId);
+            $snapshot = $revision->snapshot;
+
+            return $this->update($page, [
+                ...Arr::only($snapshot['page'], ['title', 'slug', 'type', 'excerpt', 'seo_title', 'seo_description', 'settings']),
+                'sections' => $snapshot['sections'],
+                'lock_version' => $version,
+                'change_note' => 'Restored revision '.$revision->version.' as a draft',
+            ], $actor);
+        });
+    }
+
+    private function lockedPage(CmsPage $page, mixed $version): CmsPage
+    {
+        $locked = CmsPage::query()->lockForUpdate()->findOrFail($page->id);
+        if (! is_numeric($version) || (int) $version !== $locked->lock_version) {
+            throw ValidationException::withMessages(['lock_version' => 'Another editor changed this page. Reload before saving.']);
+        }
+
+        return $locked;
+    }
+
+    private function capturePublication(CmsPage $page): void
+    {
+        $page->forceFill([
+            'published_slug' => $page->slug,
+            'published_content' => $this->publicSnapshot($page),
+        ])->save();
+    }
+
+    /** @return array<string, mixed> */
+    private function publicSnapshot(CmsPage $page): array
+    {
+        $content = CmsPageResource::make($page->load('sections'))->resolve();
+        unset($content['revisions']);
+        $content['sections'] = $page->sections->where('is_visible', true)
+            ->map(fn ($section) => CmsSectionResource::make($section)->resolve())->values()->all();
+
+        return $content;
     }
 
     private function syncSections(CmsPage $page, mixed $sections): void
@@ -164,7 +243,7 @@ class CmsPageService extends CoreService
         $page->revisions()->create([
             'version' => $version,
             'snapshot' => [
-                'page' => Arr::except($page->toArray(), ['sections', 'revisions']),
+                'page' => Arr::except($page->toArray(), ['sections', 'revisions', 'published_content']),
                 'sections' => $page->sections->values()->toArray(),
             ],
             'change_note' => $changeNote,
@@ -182,6 +261,9 @@ class CmsPageService extends CoreService
 
     private function forgetPublishedPage(string $slug): void
     {
-        Cache::forget(self::CACHE_PREFIX.$slug);
+        DB::afterCommit(function () use ($slug): void {
+            Cache::forget(self::CACHE_PREFIX.$slug);
+            Cache::forget(self::CACHE_PREFIX.'content:'.$slug);
+        });
     }
 }

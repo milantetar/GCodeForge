@@ -39,6 +39,9 @@ abstract class AbstractGCodeConverter
     protected function result(array $lines, int $inputLines, int $startedAt, array $warnings = [], array $extra = []): ConversionResult
     {
         $output = implode("\n", $lines)."\n";
+        if (strlen($output) > (int) config('gcode.max_output_bytes', 16 * 1024 * 1024)) {
+            throw new InvalidGCode('Generated output exceeds the configured size limit. Reduce repetitions.');
+        }
 
         return new ConversionResult($output, $warnings, [
             'input_lines' => $inputLines,

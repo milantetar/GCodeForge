@@ -53,13 +53,9 @@ class PatternRepeaterConverter extends AbstractGCodeConverter implements GCodeCo
                     throw new InvalidGCode('A pattern coordinate could not be parsed.');
                 }
 
-                $output[] = sprintf(
-                    'Z%s X%s Y%s%s',
-                    $sourceY->format(),
-                    $sourceX->negate()->format(),
-                    $sourceX->plus($offset)->format(),
-                    GCodeLine::inlineComment($line),
-                );
+                $transformed = GCodeLine::replaceAxis($line, 'Z', $sourceY->format());
+                $transformed = GCodeLine::replaceAxis($transformed, 'X', $sourceX->negate()->format());
+                $output[] = GCodeLine::replaceAxis($transformed, 'Y', $sourceX->plus($offset)->format());
             }
         }
 

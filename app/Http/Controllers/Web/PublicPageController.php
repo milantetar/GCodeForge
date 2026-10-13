@@ -3,7 +3,6 @@
 namespace App\Http\Controllers\Web;
 
 use App\Http\Controllers\Controller;
-use App\Http\Resources\CmsPageResource;
 use App\Services\Cms\CmsPageService;
 use Illuminate\Http\Request;
 use Inertia\Inertia;
@@ -33,8 +32,14 @@ class PublicPageController extends Controller
     /** @return array<string, mixed>|null */
     private function resolvePage(Request $request, string $slug): ?array
     {
-        $page = $this->pageService->publishedBySlug($slug);
+        return $this->pageService->publishedContentBySlug($slug);
+    }
 
-        return $page === null ? null : CmsPageResource::make($page)->resolve($request);
+    public function show(Request $request, string $slug): Response
+    {
+        $page = $this->resolvePage($request, $slug);
+        abort_if($page === null, 404);
+
+        return Inertia::render('welcome', ['cmsPage' => $page]);
     }
 }

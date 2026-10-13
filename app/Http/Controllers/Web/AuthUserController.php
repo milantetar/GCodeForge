@@ -9,6 +9,8 @@ use App\Models\User;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Str;
+use Illuminate\Validation\ValidationException;
 use Inertia\Inertia;
 use Inertia\Response;
 use Laravel\Socialite\Facades\Socialite;
@@ -45,6 +47,9 @@ class AuthUserController extends Controller
     public function redirectToProvider(string $provider): SymfonyRedirectResponse
     {
         abort_unless(in_array($provider, self::SOCIALITE_PROVIDERS, true), 404);
+        if (! config('services.'.$provider.'.client_id') || ! config('services.'.$provider.'.client_secret') || ! config('services.'.$provider.'.redirect')) {
+            return to_route('login')->withErrors(['email' => 'This sign-in provider is not configured yet. Use email and password for now.']);
+        }
 
         return Socialite::driver($provider)->redirect();
     }
@@ -72,6 +77,7 @@ class AuthUserController extends Controller
                 ->withErrors(['email' => 'Your social account did not share an email address.']);
         }
 
+        $email = Str::lower(trim($email));
         $providerId = (string) $socialiteUser->getId();
 
         $user = DB::transaction(function () use ($email, $provider, $providerId, $socialiteUser): User {
@@ -85,19 +91,22 @@ class AuthUserController extends Controller
                 return $socialAccount->user;
             }
 
-            $user = User::query()->where('email', $email)->firstOr(function () use ($email, $socialiteUser): User {
+            if (User::withTrashed()->where('email', $email)->exists()) {
+                throw ValidationException::withMessages(['email' => 'An account already uses this email. Sign in using its existing method.']);
+            }
+            $user = (function () use ($email, $socialiteUser): User {
                 $user = User::create([
                     'name' => $socialiteUser->getName() ?: $socialiteUser->getNickname() ?: $email,
                     'email' => $email,
                     'avatar_url' => $socialiteUser->getAvatar(),
-                    'email_verified_at' => now(),
+                    'email_verified_at' => null,
                     'preferred_theme' => 'dark',
                 ]);
 
                 $user->assignRole(Role::findOrCreate('user', 'web'));
 
                 return $user;
-            });
+            })();
 
             $user->socialAccounts()->create([
                 'provider' => $provider,
@@ -118,6 +127,15 @@ class AuthUserController extends Controller
                 ->withErrors(['email' => 'This account is not currently active.']);
         }
 
+        if ($user->hasEnabledTwoFactorAuthentication()) {
+            request()->session()->put(['login.id' => $user->id, 'login.remember' => true]);
+
+            return redirect()->route('two-factor.login');
+        }
+
+        if (! $user->hasVerifiedEmail()) {
+            $user->sendEmailVerificationNotification();
+        }
         Auth::login($user, remember: true);
         request()->session()->regenerate();
 

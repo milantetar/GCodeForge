@@ -3,7 +3,7 @@ import { Head } from '@inertiajs/react';
 import { PublicPageRenderer } from '@/components/cms/public-page-renderer';
 import type { Auth, CmsPage } from '@/types';
 
-type WelcomeProps = { auth: Auth; cmsPage: CmsPage | null };
+type WelcomeProps = { auth: Auth; cmsPage: CmsPage | null; preview?: boolean };
 
 const fallbackPage: CmsPage = {
     id: 0,
@@ -27,7 +27,7 @@ const fallbackPage: CmsPage = {
                 title: 'Forge better G-code.',
                 accent: 'Ship with confidence.',
                 description:
-                    'Build, inspect, and optimize machine instructions with AI-assisted precision and real-time validation.',
+                    'Transform G-code with three focused converters, reusable machine profiles, and a private project history. Always simulate output before machining.',
                 primary_label: 'Create free workspace',
                 secondary_label: 'See how it works',
             },
@@ -38,16 +38,26 @@ const fallbackPage: CmsPage = {
     ],
 };
 
-export default function Welcome({ auth, cmsPage }: WelcomeProps) {
+export default function Welcome({
+    auth,
+    cmsPage,
+    preview = false,
+}: WelcomeProps) {
     const page = cmsPage ?? fallbackPage;
 
     return (
         <>
             <Head title={page.seo.title ?? page.title}>
+                {preview && <meta name="robots" content="noindex,nofollow" />}
                 {page.seo.description && (
                     <meta name="description" content={page.seo.description} />
                 )}
             </Head>
+            {preview && (
+                <div className="bg-violet-600 px-4 py-3 text-center text-sm text-white">
+                    Saved draft preview — this content is not necessarily live.
+                </div>
+            )}
             <PublicPageRenderer page={page} auth={auth} />
         </>
     );

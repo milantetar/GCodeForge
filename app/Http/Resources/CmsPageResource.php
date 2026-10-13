@@ -25,7 +25,12 @@ class CmsPageResource extends JsonResource
             ],
             'settings' => $this->settings ?? [],
             'published_at' => $this->published_at,
-            'sections' => CmsSectionResource::collection($this->whenLoaded('sections') ?? []),
+            'lock_version' => $this->lock_version,
+            'published_slug' => $this->published_slug,
+            'has_unpublished_changes' => $this->published_content !== null
+                && ($this->published_content['lock_version'] ?? -1) !== $this->lock_version,
+            'sections' => $this->whenLoaded('sections',
+                fn () => CmsSectionResource::collection($this->sections)->resolve($request), []),
             'revisions' => $this->whenLoaded('revisions', fn () => $this->revisions->map(fn ($revision) => [
                 'id' => $revision->id,
                 'version' => $revision->version,

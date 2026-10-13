@@ -28,7 +28,8 @@ class CmsPageSeeder extends Seeder
                     'eyebrow' => 'The intelligent workspace for modern manufacturing',
                     'title' => 'Forge better G-code.',
                     'accent' => 'Ship with confidence.',
-                    'description' => 'Build, inspect, and optimize machine instructions with AI-assisted precision, real-time validation, and a workflow your entire team can trust.',
+                    'description' => 'Transform G-code with three focused converters, reusable machine profiles, and a private project history. Always simulate output before machining.',
+                    'rotating_phrases' => ['Repeat with precision.', 'Keep every revision.', 'Build your next pattern.'],
                     'primary_label' => 'Create free workspace',
                     'secondary_label' => 'See how it works',
                 ],
@@ -42,8 +43,8 @@ class CmsPageSeeder extends Seeder
                     'title' => 'A calmer way to build complex things.',
                     'description' => 'Powerful enough for serious engineering, focused enough to stay out of your way.',
                     'items' => [
-                        ['icon' => 'bot', 'title' => 'AI toolpath copilot', 'description' => 'Turn intent into precise machine instructions with context-aware assistance.'],
-                        ['icon' => 'gauge', 'title' => 'Instant validation', 'description' => 'Catch unsafe moves, collisions, and inefficient paths before they reach your machine.'],
+                        ['icon' => 'layers', 'title' => 'Three focused converters', 'description' => 'Build repeatable patterns with deterministic coordinate transformations.'],
+                        ['icon' => 'gauge', 'title' => 'Input validation', 'description' => 'Reject malformed numeric words and oversized workloads before conversion.'],
                         ['icon' => 'shield', 'title' => 'Team-grade control', 'description' => 'Role-based access, secure workspaces, and an audit-ready activity trail.'],
                     ],
                 ],
@@ -59,7 +60,7 @@ class CmsPageSeeder extends Seeder
                     'items' => [
                         ['title' => 'Describe', 'description' => 'Set material, machine, and production intent.'],
                         ['title' => 'Forge', 'description' => 'Transform repeatable toolpaths with deterministic converters.'],
-                        ['title' => 'Validate', 'description' => 'Review warnings, output, and machine-safe limits.'],
+                        ['title' => 'Inspect', 'description' => 'Review output, simulate externally, and dry-run before machining.'],
                     ],
                 ],
             ],
@@ -108,7 +109,7 @@ class CmsPageSeeder extends Seeder
         string $seoTitle,
         string $seoDescription,
     ): CmsPage {
-        return CmsPage::query()->updateOrCreate(
+        return CmsPage::query()->firstOrCreate(
             ['slug' => $slug],
             [
                 'title' => $title,
@@ -126,6 +127,9 @@ class CmsPageSeeder extends Seeder
     /** @param array<int, array{key: string, type: string, name: string, content: array<string, mixed>}> $sections */
     private function sections(CmsPage $page, array $sections): void
     {
+        if (! $page->wasRecentlyCreated) {
+            return;
+        }
         foreach ($sections as $order => $section) {
             $page->sections()->updateOrCreate(
                 ['key' => $section['key']],

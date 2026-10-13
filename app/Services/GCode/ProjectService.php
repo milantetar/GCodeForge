@@ -3,13 +3,15 @@
 namespace App\Services\GCode;
 
 use App\Enums\ProjectStatus;
+use App\Models\MachineProfile;
 use App\Models\Project;
 use App\Models\User;
 use App\Repositories\GCode\ProjectRepository;
 use App\Services\CoreService;
-use Illuminate\Contracts\Pagination\LengthAwarePaginator;
+use Illuminate\Pagination\LengthAwarePaginator;
 use Illuminate\Support\Arr;
 use Illuminate\Support\Str;
+use Illuminate\Validation\ValidationException;
 
 /** @extends CoreService<Project, ProjectRepository> */
 class ProjectService extends CoreService
@@ -34,6 +36,7 @@ class ProjectService extends CoreService
     /** @param array<string, mixed> $data */
     public function create(User $user, array $data): Project
     {
+        $this->validateProfile($user, $data);
         /** @var Project $project */
         $project = $this->projectRepository->create([
             ...Arr::except($data, ['slug']),
@@ -49,6 +52,7 @@ class ProjectService extends CoreService
     /** @param array<string, mixed> $data */
     public function update(Project $project, array $data): Project
     {
+        $this->validateProfile($project->user, $data);
         if (isset($data['slug']) || (isset($data['name']) && $data['name'] !== $project->name)) {
             $data['slug'] = $this->uniqueSlug(
                 $project->user,
@@ -79,7 +83,7 @@ class ProjectService extends CoreService
         $slug = $base;
         $suffix = 2;
 
-        while ($this->projectRepository->query()
+        while ($this->projectRepository->query()->withTrashed()
             ->where('user_id', $user->id)
             ->where('slug', $slug)
             ->when($ignoreId !== null, fn ($query) => $query->whereKeyNot($ignoreId))
@@ -88,5 +92,13 @@ class ProjectService extends CoreService
         }
 
         return $slug;
+    }
+
+    /** @param array<string, mixed> $data */
+    private function validateProfile(User $user, array $data): void
+    {
+        if (! empty($data['machine_profile_id']) && ! MachineProfile::query()->whereKey($data['machine_profile_id'])->where('user_id', $user->id)->exists()) {
+            throw ValidationException::withMessages(['machine_profile_id' => 'Choose a profile belonging to this project owner.']);
+        }
     }
 }

@@ -25,10 +25,10 @@ class ConversionResource extends JsonResource
                 'output_lines' => $this->output_lines,
                 'duration_ms' => $this->duration_ms,
             ],
-            'project' => new ProjectResource($this->whenLoaded('project')),
+            'project' => $this->whenLoaded('project', fn () => $this->project === null ? null : ProjectResource::make($this->project)->resolve($request)),
             'machine_profile' => new MachineProfileResource($this->whenLoaded('machineProfile')),
             'download_url' => $this->status === ConversionStatus::Completed
-                ? route('api.v1.conversions.download', $this)
+                ? route($request->is('api/*') ? 'api.v1.conversions.download' : 'conversions.download', $this)
                 : null,
             'queued_at' => $this->queued_at,
             'started_at' => $this->started_at,

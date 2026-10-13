@@ -16,7 +16,7 @@ class VerifyEmailNotification extends VerifyEmail implements ShouldQueue
     public function __construct(
         private readonly string $verificationRoute = 'verification.verify',
     ) {
-        $this->afterCommit();
+        $this->onQueue('mail')->afterCommit();
     }
 
     /**

@@ -43,6 +43,9 @@ export type CmsPage = {
     seo: { title: string | null; description: string | null };
     settings: CmsJsonObject;
     published_at: string | null;
+    lock_version?: number;
+    published_slug?: string | null;
+    has_unpublished_changes?: boolean;
     sections: CmsSection[];
     revisions?: CmsRevision[];
     sections_count?: number;

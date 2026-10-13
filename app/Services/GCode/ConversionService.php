@@ -2,12 +2,15 @@
 
 namespace App\Services\GCode;
 
+use App\Domain\GCode\ConversionOptions;
 use App\Domain\GCode\ConverterManager;
 use App\Domain\GCode\Data\ConversionResult;
 use App\Domain\GCode\Data\ConversionSubmission;
+use App\Domain\GCode\Exceptions\InvalidGCode;
 use App\Enums\ConversionFileKind;
 use App\Enums\ConversionStatus;
 use App\Enums\ConverterType;
+use App\Enums\ProjectStatus;
 use App\Jobs\ProcessGCodeConversion;
 use App\Models\Conversion;
 use App\Models\ConversionFile;
@@ -17,7 +20,7 @@ use App\Models\User;
 use App\Repositories\GCode\ConversionRepository;
 use App\Services\CoreService;
 use Illuminate\Auth\Access\AuthorizationException;
-use Illuminate\Contracts\Pagination\LengthAwarePaginator;
+use Illuminate\Pagination\LengthAwarePaginator;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
@@ -52,59 +55,71 @@ class ConversionService extends CoreService
         if ($project->user_id !== $user->id && ! $user->can('projects.manage')) {
             throw new AuthorizationException;
         }
+        if ($project->status === ProjectStatus::Archived) {
+            throw new InvalidGCode('Restore this project before creating a conversion.');
+        }
 
         $gcode = $data['gcode'];
         $profile = $project->machine_profile_id === null
             ? null
             : MachineProfile::query()->find($project->machine_profile_id);
-        $options = [
+        $options = app(ConversionOptions::class)->normalize($type, $gcode, [
             ...($profile->settings ?? []),
             ...$data['options'],
-        ];
+        ]);
         $publicId = (string) Str::ulid();
         $disk = (string) config('gcode.disk', 'local');
         $inputPath = "gcode/{$user->id}/{$publicId}/input.nc";
 
-        /** @var Conversion $conversion */
-        $conversion = $this->conversionRepository->create([
-            'public_id' => $publicId,
-            'user_id' => $user->id,
-            'project_id' => $project->id,
-            'machine_profile_id' => $profile?->id,
-            'type' => $type,
-            'status' => ConversionStatus::Pending,
-            'options' => $options,
-            'input_hash' => hash('sha256', $gcode),
-            'input_lines' => substr_count(str_replace(["\r\n", "\r"], "\n", $gcode), "\n") + 1,
-        ]);
+        $shouldQueue = (bool) ($data['async'] ?? false)
+            || strlen($gcode) >= (int) config('gcode.queue_threshold_bytes', 256 * 1024)
+            || strlen($gcode) * $options['repetitions'] >= (int) config('gcode.queue_threshold_bytes', 256 * 1024);
 
         if (! Storage::disk($disk)->put($inputPath, $gcode)) {
-            $conversion->forceDelete();
-
             throw new RuntimeException('The source G-code could not be written to private storage.');
         }
+        try {
+            $conversion = $this->transaction(function () use ($publicId, $user, $project, $profile, $type, $options, $gcode, $disk, $inputPath, $data, $shouldQueue): Conversion {
+                /** @var Conversion $conversion */
+                $conversion = $this->conversionRepository->create([
+                    'public_id' => $publicId,
+                    'user_id' => $user->id,
+                    'project_id' => $project->id,
+                    'machine_profile_id' => $profile?->id,
+                    'type' => $type,
+                    'status' => ConversionStatus::Pending,
+                    'options' => $options,
+                    'input_hash' => hash('sha256', $gcode),
+                    'input_lines' => substr_count(str_replace(["\r\n", "\r"], "\n", $gcode), "\n") + 1,
+                    'queued_at' => $shouldQueue ? now() : null,
+                ]);
 
-        $conversion->files()->create([
-            'kind' => ConversionFileKind::Input,
-            'disk' => $disk,
-            'path' => $inputPath,
-            'original_name' => $this->sourceFilename($data['source_filename'] ?? null),
-            'mime_type' => 'text/plain',
-            'size_bytes' => strlen($gcode),
-            'checksum' => hash('sha256', $gcode),
-        ]);
+                $conversion->files()->create([
+                    'kind' => ConversionFileKind::Input,
+                    'disk' => $disk,
+                    'path' => $inputPath,
+                    'original_name' => $this->sourceFilename($data['source_filename'] ?? null),
+                    'mime_type' => 'text/plain',
+                    'size_bytes' => strlen($gcode),
+                    'checksum' => hash('sha256', $gcode),
+                ]);
 
-        $shouldQueue = (bool) ($data['async'] ?? false)
-            || strlen($gcode) >= (int) config('gcode.queue_threshold_bytes', 256 * 1024);
+                if ($shouldQueue) {
+                    ProcessGCodeConversion::dispatch($conversion->id)->afterCommit();
+                }
+
+                return $conversion;
+            });
+        } catch (Throwable $exception) {
+            if (! Conversion::query()->where('public_id', $publicId)->exists()) {
+                Storage::disk($disk)->delete($inputPath);
+            } else {
+                Conversion::query()->where('public_id', $publicId)->update(['status' => ConversionStatus::Failed, 'error_message' => 'The conversion could not be queued. Please try again.', 'completed_at' => now()]);
+            }
+            throw $exception;
+        }
 
         if ($shouldQueue) {
-            $conversion->forceFill([
-                'queued_at' => now(),
-                'status' => ConversionStatus::Pending,
-            ])->save();
-
-            ProcessGCodeConversion::dispatch($conversion->id)->afterCommit();
-
             return new ConversionSubmission($conversion->refresh(), null, true);
         }
 
@@ -119,6 +134,18 @@ class ConversionService extends CoreService
 
     public function process(Conversion $conversion): ConversionResult
     {
+        return Cache::lock('gcode:processing:'.$conversion->id, 150)->block(3, fn (): ConversionResult => $this->processLocked($conversion));
+    }
+
+    private function processLocked(Conversion $conversion): ConversionResult
+    {
+        $conversion->refresh();
+        if ($conversion->status === ConversionStatus::Completed) {
+            return new ConversionResult($this->fileContents($conversion, ConversionFileKind::Output), $conversion->warnings ?? [], [
+                'input_lines' => $conversion->input_lines ?? 0, 'output_lines' => $conversion->output_lines ?? 0,
+                'duration_ms' => $conversion->duration_ms ?? 0,
+            ]);
+        }
         $conversion->forceFill([
             'status' => ConversionStatus::Processing,
             'started_at' => now(),
@@ -143,10 +170,11 @@ class ConversionService extends CoreService
 
             return $result;
         } catch (Throwable $exception) {
+            $retryable = ! $exception instanceof InvalidGCode && $conversion->queued_at !== null;
             $conversion->forceFill([
-                'status' => ConversionStatus::Failed,
-                'error_message' => Str::limit($exception->getMessage(), 2000, ''),
-                'completed_at' => now(),
+                'status' => $retryable ? ConversionStatus::Pending : ConversionStatus::Failed,
+                'error_message' => $exception instanceof InvalidGCode ? Str::limit($exception->getMessage(), 500, '') : 'Conversion could not be completed. Please retry or contact support with the conversion ID.',
+                'completed_at' => $retryable ? null : now(),
             ])->save();
 
             throw $exception;
@@ -155,16 +183,33 @@ class ConversionService extends CoreService
 
     public function outputFile(Conversion $conversion): ConversionFile
     {
+        abort_unless($conversion->status === ConversionStatus::Completed, 409, 'The conversion is not complete.');
         /** @var ConversionFile|null $file */
         $file = $conversion->files()
             ->where('kind', ConversionFileKind::Output->value)
             ->first();
 
         if ($file === null || ! Storage::disk($file->disk)->exists($file->path)) {
-            throw new RuntimeException('The generated G-code file is not available.');
+            abort(404, 'The generated G-code file is not available.');
         }
 
         return $file;
+    }
+
+    public function outputPreview(Conversion $conversion): string
+    {
+        $file = $this->outputFile($conversion);
+        $stream = Storage::disk($file->disk)->readStream($file->path);
+        if (! is_resource($stream)) {
+            return '';
+        }
+        try {
+            $content = fread($stream, 64 * 1024);
+
+            return $content === false ? '' : $content;
+        } finally {
+            fclose($stream);
+        }
     }
 
     private function convertWithCache(Conversion $conversion, string $input): ConversionResult

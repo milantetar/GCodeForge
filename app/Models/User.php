@@ -3,6 +3,7 @@
 namespace App\Models;
 
 use App\Enums\UserStatus;
+use App\Notifications\ResetPasswordNotification;
 use App\Notifications\VerifyEmailNotification;
 use Database\Factories\UserFactory;
 use Illuminate\Contracts\Auth\MustVerifyEmail;
@@ -148,6 +149,11 @@ class User extends Authenticatable implements MustVerifyEmail, PasskeyUser
     public function sendApiEmailVerificationNotification(): void
     {
         $this->notify(new VerifyEmailNotification('api.v1.verification.verify'));
+    }
+
+    public function sendPasswordResetNotification($token): void
+    {
+        $this->notify(new ResetPasswordNotification($token));
     }
 
     /**

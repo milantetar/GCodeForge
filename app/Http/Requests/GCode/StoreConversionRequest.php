@@ -4,6 +4,7 @@ namespace App\Http\Requests\GCode;
 
 use App\Enums\ConverterType;
 use Illuminate\Foundation\Http\FormRequest;
+use Illuminate\Http\UploadedFile;
 
 class StoreConversionRequest extends FormRequest
 {
@@ -22,20 +23,21 @@ class StoreConversionRequest extends FormRequest
 
         return [
             'project_id' => ['required', 'integer', 'exists:projects,id'],
-            'gcode' => ['required', 'string', 'max:'.$maxBytes],
+            'gcode' => ['required_without:file', 'nullable', 'string', 'max:'.$maxBytes, 'prohibits:file'],
+            'file' => ['required_without:gcode', 'nullable', 'file', 'extensions:nc,gcode,tap,txt', 'max:'.(int) ceil($maxBytes / 1024)],
             'source_filename' => ['nullable', 'string', 'max:255'],
             'async' => ['sometimes', 'boolean'],
-            'options' => ['required', 'array'],
+            'options' => ['present', 'array'],
             'options.repetitions' => ['sometimes', 'integer', 'between:1,'.$maxRepetitions],
             'options.y_distance' => in_array($type, [ConverterType::PatternRepeater, ConverterType::HexagonalFlat], true)
                 ? ['sometimes', 'regex:/^[+-]?(?:\d+(?:\.\d*)?|\.\d+)$/']
                 : ['prohibited'],
             'options.b_increment' => $type === ConverterType::TwoAxis ? $decimal : ['prohibited'],
             'options.rapid_feed_rate' => $type === ConverterType::TwoAxis
-                ? ['sometimes', 'integer', 'between:0,1000000']
+                ? ['sometimes', 'integer', 'between:1,1000000']
                 : ['prohibited'],
             'options.engraving_feed_rate' => $type === ConverterType::TwoAxis
-                ? ['sometimes', 'integer', 'between:0,1000000']
+                ? ['sometimes', 'integer', 'between:1,1000000']
                 : ['prohibited'],
         ];
     }
@@ -51,14 +53,15 @@ class StoreConversionRequest extends FormRequest
     public function conversionData(): array
     {
         $validated = $this->validated();
+        $file = $this->file('file');
 
         return [
-            'gcode' => (string) $validated['gcode'],
+            'gcode' => $file instanceof UploadedFile ? $file->getContent() : (string) ($validated['gcode'] ?? ''),
             'options' => is_array($validated['options']) ? $validated['options'] : [],
             'async' => (bool) ($validated['async'] ?? false),
-            'source_filename' => is_string($validated['source_filename'] ?? null)
+            'source_filename' => $file instanceof UploadedFile ? $file->getClientOriginalName() : (is_string($validated['source_filename'] ?? null)
                 ? $validated['source_filename']
-                : null,
+                : null),
         ];
     }
 }

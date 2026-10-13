@@ -24,8 +24,8 @@ class SaveMachineProfileRequest extends FormRequest
             'settings.repetitions' => ['sometimes', 'integer', 'between:1,'.(int) config('gcode.max_repetitions', 1000)],
             'settings.y_distance' => ['sometimes', 'regex:/^[+-]?(?:\d+(?:\.\d*)?|\.\d+)$/'],
             'settings.b_increment' => ['sometimes', 'regex:/^[+-]?(?:\d+(?:\.\d*)?|\.\d+)$/'],
-            'settings.rapid_feed_rate' => ['sometimes', 'integer', 'between:0,1000000'],
-            'settings.engraving_feed_rate' => ['sometimes', 'integer', 'between:0,1000000'],
+            'settings.rapid_feed_rate' => ['sometimes', 'integer', 'between:1,1000000'],
+            'settings.engraving_feed_rate' => ['sometimes', 'integer', 'between:1,1000000'],
             'is_default' => ['sometimes', 'boolean'],
         ];
     }

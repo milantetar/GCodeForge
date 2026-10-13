@@ -19,12 +19,16 @@ Route::prefix('v1')->group(function () {
     /**
      * Guest Auth Routes
      */
-    Route::middleware('guest')->group(function () {
+    Route::middleware(['guest', 'throttle:api-auth'])->group(function () {
         Route::post('/register', [AuthUserController::class, 'registerUser']);
         Route::post('/login', [AuthUserController::class, 'loginUser']);
+        Route::post('/login/two-factor', [AuthUserController::class, 'twoFactor']);
+        Route::post('/forgot-password', [AuthUserController::class, 'forgotPassword']);
+        Route::post('/reset-password', [AuthUserController::class, 'resetPassword']);
     });
 
-    Route::middleware('auth:sanctum')->group(function () {
+    Route::middleware(['auth:sanctum', 'active'])->group(function () {
+        Route::post('/auth/logout-all', [AuthUserController::class, 'logoutAll']);
         Route::get('/auth/me', [AuthUserController::class, 'me']);
         Route::post('/auth/logout', [AuthUserController::class, 'logoutUser']);
         Route::get('/email/verification-status', [AuthUserController::class, 'verificationStatus']);
@@ -35,8 +39,9 @@ Route::prefix('v1')->group(function () {
 
     Route::prefix('cms')
         ->name('api.v1.cms.')
-        ->middleware(['auth:sanctum', 'verified', 'can:cms.manage'])
+        ->middleware(['auth:sanctum', 'active', 'verified', 'can:cms.manage'])
         ->group(function () {
+            Route::post('/pages/{cmsPage}/revisions/{revision}/restore', [CmsPageController::class, 'restore'])->name('pages.restore');
             Route::apiResource('pages', CmsPageController::class)
                 ->parameters(['pages' => 'cmsPage']);
             Route::post('/pages/{cmsPage}/publish', [CmsPageController::class, 'publish'])
@@ -44,7 +49,7 @@ Route::prefix('v1')->group(function () {
                 ->name('pages.publish');
         });
 
-    Route::middleware(['auth:sanctum', 'verified', 'can:gcode.use'])->group(function () {
+    Route::middleware(['auth:sanctum', 'active', 'verified', 'can:gcode.use'])->group(function () {
         Route::prefix('projects')->name('api.v1.projects.')->group(function () {
             Route::get('/', [ProjectController::class, 'index'])->name('index');
             Route::post('/', [ProjectController::class, 'store'])->name('store');
@@ -63,6 +68,7 @@ Route::prefix('v1')->group(function () {
         });
 
         Route::post('/conversions/{converter}', [ConversionController::class, 'store'])
+            ->middleware('throttle:30,1')
             ->whereIn('converter', ConverterType::values())
             ->name('api.v1.conversions.store');
         Route::get('/conversions/{conversion}', [ConversionController::class, 'show'])

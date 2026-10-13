@@ -1,6 +1,7 @@
 import { Link, router, usePage } from '@inertiajs/react';
 import {
-    Bell,
+    FolderOpen,
+    SlidersHorizontal,
     FileText,
     LayoutDashboard,
     LogOut,
@@ -21,12 +22,22 @@ type AppShellProps = PropsWithChildren<{ title: string; actions?: ReactNode }>;
 
 const baseLinks = [
     { href: '/dashboard', label: 'Workspace', icon: LayoutDashboard },
+    { href: '/projects', label: 'Projects', icon: FolderOpen },
+    {
+        href: '/machine-profiles',
+        label: 'Machine profiles',
+        icon: SlidersHorizontal,
+    },
     { href: '/settings/profile', label: 'Profile', icon: Settings },
     { href: '/settings/security', label: 'Security', icon: Shield },
 ];
 
 export function AppShell({ title, actions, children }: AppShellProps) {
-    const { auth } = usePage<{ auth: Auth }>().props;
+    const { auth, flash } = usePage<{
+        auth: Auth;
+        flash?: { success?: string; error?: string };
+    }>().props;
+    const { url } = usePage();
     const [mobileOpen, setMobileOpen] = useState(false);
     const links = auth.permissions.includes('cms.view')
         ? [
@@ -42,7 +53,7 @@ export function AppShell({ title, actions, children }: AppShellProps) {
     const nav = (
         <>
             {links.map(({ href, label, icon: Icon }) => {
-                const active = window.location.pathname === href;
+                const active = url.split('?')[0] === href;
 
                 return (
                     <Link
@@ -134,19 +145,27 @@ export function AppShell({ title, actions, children }: AppShellProps) {
                             {title}
                         </h1>
                     </div>
-                    <div className="flex items-center gap-2">
-                        {actions}
-                        <Button
-                            variant="ghost"
-                            size="icon"
-                            className="text-zinc-600"
-                            aria-label="Notifications"
-                        >
-                            <Bell className="size-4" />
-                        </Button>
-                    </div>
+                    <div className="flex items-center gap-2">{actions}</div>
                 </header>
-                <div className="mx-auto max-w-7xl p-5 sm:p-8">{children}</div>
+                <div className="mx-auto max-w-7xl p-5 sm:p-8">
+                    {flash?.success && (
+                        <p
+                            role="status"
+                            className="mb-5 rounded-xl border border-emerald-400/20 bg-emerald-500/5 p-4 text-sm text-emerald-200"
+                        >
+                            {flash.success}
+                        </p>
+                    )}
+                    {flash?.error && (
+                        <p
+                            role="alert"
+                            className="mb-5 rounded-xl border border-red-400/20 p-4 text-sm text-red-200"
+                        >
+                            {flash.error}
+                        </p>
+                    )}
+                    {children}
+                </div>
             </div>
         </main>
     );

@@ -83,7 +83,7 @@ class ConversionController extends BaseController
         return Storage::disk($file->disk)->download(
             $file->path,
             $file->original_name,
-            ['Content-Type' => $file->mime_type],
+            ['Content-Type' => $file->mime_type, 'Cache-Control' => 'private, no-store', 'X-Content-Type-Options' => 'nosniff'],
         );
     }
 

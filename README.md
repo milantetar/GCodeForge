@@ -10,9 +10,15 @@ and validating specialized CNC G-code. This repository is the Laravel rebuild of
 the original React proof of concept, with authentication, role-based access,
 auditable processing, and a production-oriented API architecture.
 
-The current phase delivers the application foundation and authentication system.
-The three converter engines documented below are the next domain module to be
-ported into tested Laravel services.
+The application includes web/API authentication, an RBAC-controlled CMS, three
+PHP converter engines, and a React project workspace with private conversion
+history. The latest implementation adds isolated CMS publications, edit-conflict
+checks, API two-factor challenges, and bounded queued conversion processing.
+
+Start with [the implementation and environment handoff](docs/IMPLEMENTATION.md)
+for migration commands, queue setup, API changes, and manual acceptance steps.
+No automated tests were run for this implementation, as requested; static checks
+and a production asset build are used for the handoff.
 
 - Live reference: [gcode-forge-studio.vercel.app](https://gcode-forge-studio.vercel.app/)
 - Repository owner: [milantetar](https://github.com/milantetar)
@@ -68,12 +74,13 @@ and administrative access control.
 | Two-factor authentication | Complete | TOTP QR setup, confirmation, recovery codes, challenge, and disable flow |
 | Profile and password settings | Complete | Powered by Laravel Fortify |
 | RBAC foundation | Complete | `user`, `admin`, and `super-admin` roles with seeded permissions |
-| Sanctum API authentication | Complete | Versioned registration, login, profile, logout, and email-verification endpoints |
-| CMS-managed pages | Complete | Draft/publish workflow, revisions, cached public content, React renderer, and RBAC admin editor |
+| Sanctum API authentication | Implemented | Throttling, expiring tokens, single-use 2FA challenge, password recovery, logout-all, active-account checks |
+| CMS-managed pages | Implemented | Published snapshots, saved-draft preview, revision restore, optimistic locking, structured editor, themes, navigation and animated headings |
 | Converter engines | Complete | Pattern Repeater, Hexagonal Flat, and Two Axis deterministic PHP domain services |
 | Conversion persistence and history | Complete | Owned projects, private files, checksums, status, metrics, and downloads |
 | Queued conversion execution | Complete | Explicit async mode and configurable size threshold with retries and timestamps |
 | Machine profiles | Complete | Per-user machine defaults merged with request-specific converter options |
+| React project workspace | Implemented | Real dashboard counts, project create/edit/archive/restore, profiles, upload/paste, queue progress, history and downloads |
 
 ## The three converters
 
@@ -545,7 +552,7 @@ Alternatively run the services separately:
 
 ```bash
 php artisan serve
-php artisan queue:work
+php artisan queue:work --queue=mail,conversions,default --tries=3 --timeout=120
 npm run dev
 ```
 
@@ -641,7 +648,7 @@ is considered production-ready.
 | `php artisan test` | Run PHPUnit tests |
 | `composer run types:check` | Run Larastan/PHPStan |
 | `composer run lint:check` | Check PHP formatting with Pint |
-| `php artisan queue:work` | Process queued conversions and mail |
+| `php artisan queue:work --queue=mail,conversions,default --tries=3 --timeout=120` | Process all application queues |
 | `php artisan telescope:prune` | Remove stale local Telescope telemetry |
 
 Run the main quality gates before opening a pull request:
@@ -790,7 +797,7 @@ Production workers should use retries, exponential backoff, timeouts, idempotenc
 and failed-job monitoring. Start a local worker with:
 
 ```bash
-php artisan queue:work --tries=3 --backoff=5
+php artisan queue:work --queue=mail,conversions,default --tries=3 --timeout=120 --backoff=5
 ```
 
 ## Testing and quality

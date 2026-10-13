@@ -25,6 +25,20 @@
     font-synthesis: none;
 }
 
+[data-forge-theme='midnight'] {
+    --color-forge-300: #93c5fd;
+    --color-forge-400: #60a5fa;
+    --color-forge-500: #3b82f6;
+    --color-forge-600: #2563eb;
+}
+
+[data-forge-theme='forest'] {
+    --color-forge-300: #6ee7b7;
+    --color-forge-400: #34d399;
+    --color-forge-500: #10b981;
+    --color-forge-600: #059669;
+}
+
 * {
     border-color: rgb(255 255 255 / 0.08);
 }

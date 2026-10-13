@@ -20,6 +20,8 @@ class ConverterManager
     /** @param array<string, mixed> $options */
     public function convert(ConverterType $type, string $gcode, array $options): ConversionResult
     {
+        $options = app(ConversionOptions::class)->normalize($type, $gcode, $options);
+
         return $this->converter($type)->convert($gcode, $options);
     }
 

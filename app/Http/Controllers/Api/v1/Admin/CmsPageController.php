@@ -48,7 +48,8 @@ class CmsPageController extends BaseController
     public function publish(Request $request, CmsPage $cmsPage): JsonResponse
     {
         $request->user()?->can('cms.publish') || abort(403);
-        $page = $this->pageService->publish($cmsPage, $this->actor($request));
+        $request->validate(['lock_version' => ['required', 'integer', 'min:0']]);
+        $page = $this->pageService->publish($cmsPage, $this->actor($request), $request->integer('lock_version'));
 
         return $this->successResponse('Page published.', new CmsPageResource($page));
     }
@@ -59,6 +60,14 @@ class CmsPageController extends BaseController
         $this->pageService->delete($cmsPage);
 
         return $this->successResponse('Page archived.');
+    }
+
+    public function restore(Request $request, CmsPage $cmsPage, int $revision): JsonResponse
+    {
+        $request->validate(['lock_version' => ['required', 'integer', 'min:0']]);
+        $page = $this->pageService->restoreRevision($cmsPage, $revision, $request->integer('lock_version'), $this->actor($request));
+
+        return $this->successResponse('Revision restored as a draft.', new CmsPageResource($page));
     }
 
     private function actor(Request $request): User

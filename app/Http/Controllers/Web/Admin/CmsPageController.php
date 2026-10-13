@@ -60,7 +60,8 @@ class CmsPageController extends Controller
     public function publish(Request $request, CmsPage $cmsPage): RedirectResponse
     {
         $request->user()?->can('cms.publish') || abort(403);
-        $this->pageService->publish($cmsPage, $this->actor($request));
+        $request->validate(['lock_version' => ['required', 'integer', 'min:0']]);
+        $this->pageService->publish($cmsPage, $this->actor($request), $request->integer('lock_version'));
 
         return back()->with('success', 'Page published.');
     }
@@ -71,6 +72,22 @@ class CmsPageController extends Controller
         $this->pageService->delete($cmsPage);
 
         return redirect()->route('admin.cms.pages.index')->with('success', 'Page archived.');
+    }
+
+    public function preview(Request $request, CmsPage $cmsPage): Response
+    {
+        return Inertia::render('welcome', [
+            'cmsPage' => CmsPageResource::make($cmsPage->load('sections'))->resolve($request),
+            'preview' => true,
+        ]);
+    }
+
+    public function restore(Request $request, CmsPage $cmsPage, int $revision): RedirectResponse
+    {
+        $request->validate(['lock_version' => ['required', 'integer', 'min:0']]);
+        $this->pageService->restoreRevision($cmsPage, $revision, $request->integer('lock_version'), $this->actor($request));
+
+        return back()->with('success', 'Revision restored as a draft. Publish when ready.');
     }
 
     private function actor(Request $request): User

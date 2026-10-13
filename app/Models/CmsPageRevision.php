@@ -6,6 +6,9 @@ use Illuminate\Database\Eloquent\Attributes\Fillable;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
+/**
+ * @property array{page: array<string, mixed>, sections: list<array<string, mixed>>} $snapshot
+ */
 #[Fillable(['version', 'snapshot', 'change_note', 'created_by'])]
 class CmsPageRevision extends Model
 {

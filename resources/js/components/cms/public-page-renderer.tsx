@@ -10,6 +10,7 @@ import {
 } from 'lucide-react';
 import { motion, useReducedMotion } from 'motion/react';
 
+import { RotatingText } from '@/components/cms/rotating-text';
 import { ForgeLogo } from '@/components/forge-logo';
 import { Button } from '@/components/ui/button';
 import type { Auth, CmsJsonObject, CmsPage, CmsSection } from '@/types';
@@ -69,6 +70,13 @@ function SectionHeading({
 function HeroSection({ section, auth }: { section: CmsSection; auth: Auth }) {
     const content = section.content;
     const authenticated = Boolean(auth.user);
+    const configured = content.rotating_phrases;
+    const phrases = Array.isArray(configured)
+        ? configured.filter(
+              (value): value is string =>
+                  typeof value === 'string' && value.trim().length > 0,
+          )
+        : [];
 
     return (
         <section className="relative mx-auto max-w-7xl px-5 pt-24 pb-28 text-center sm:px-8 lg:pt-36">
@@ -86,9 +94,21 @@ function HeroSection({ section, auth }: { section: CmsSection; auth: Auth }) {
                 className="mx-auto mt-7 max-w-5xl text-5xl leading-[0.98] font-semibold tracking-[-0.055em] text-white sm:text-6xl lg:text-[5.4rem]"
             >
                 {text(content, 'title')}
-                <span className="block bg-gradient-to-r from-forge-300 via-violet-400 to-blue-400 bg-clip-text text-transparent">
-                    {text(content, 'accent')}
-                </span>
+                <RotatingText
+                    phrases={
+                        phrases.length
+                            ? phrases
+                            : [
+                                  text(
+                                      content,
+                                      'accent',
+                                      'Repeat with precision.',
+                                  ),
+                                  'Keep every revision.',
+                                  'Build your next pattern.',
+                              ]
+                    }
+                />
             </motion.h1>
             <p className="mx-auto mt-7 max-w-2xl text-base leading-7 text-zinc-500 sm:text-lg">
                 {text(content, 'description')}
@@ -120,7 +140,7 @@ function HeroSection({ section, auth }: { section: CmsSection; auth: Auth }) {
                         <span className="size-2.5 rounded-full bg-emerald-400/60" />
                     </div>
                     turbine-bracket.nc{' '}
-                    <span className="text-emerald-400">● Validated</span>
+                    <span className="text-zinc-400">Illustrative preview</span>
                 </div>
                 <div className="grid min-h-80 lg:grid-cols-[1.2fr_.8fr]">
                     <div className="space-y-2 bg-[#09090d] p-7 font-mono text-xs">
@@ -210,6 +230,11 @@ function WorkflowSection({ section }: { section: CmsSection }) {
             className="mx-auto grid max-w-7xl gap-12 px-5 py-28 sm:px-8 lg:grid-cols-2 lg:items-center"
         >
             <SectionHeading content={content} />
+            {text(content, 'body') && (
+                <p className="mt-6 whitespace-pre-wrap text-zinc-400">
+                    {text(content, 'body')}
+                </p>
+            )}
             <div className="space-y-3">
                 {items(content, 'items').map((item, index) => (
                     <div
@@ -294,6 +319,11 @@ function RichTextSection({ section }: { section: CmsSection }) {
             className="mx-auto max-w-4xl px-5 py-20 sm:px-8"
         >
             <SectionHeading content={content} />
+            {text(content, 'body') && (
+                <p className="mt-6 text-sm leading-7 whitespace-pre-wrap text-zinc-400">
+                    {text(content, 'body')}
+                </p>
+            )}
             <div className="mt-10 space-y-8">
                 {items(content, 'blocks').map((block, index) => (
                     <article key={`${text(block, 'title')}-${index}`}>
@@ -312,22 +342,44 @@ function RichTextSection({ section }: { section: CmsSection }) {
 
 export function PublicPageRenderer({ page, auth }: PublicPageRendererProps) {
     const reduceMotion = useReducedMotion();
-    const sections = (Array.isArray(page.sections) ? page.sections : []).filter((section) => section.is_visible);
+    const sections = (Array.isArray(page.sections) ? page.sections : []).filter(
+        (section) =>
+            section &&
+            section.is_visible &&
+            section.content &&
+            typeof section.content === 'object',
+    );
+    const configuredLinks = items(page.settings, 'navigation').filter((link) =>
+        /^(?:\/(?!\/)[a-zA-Z0-9/_-]*|#[a-zA-Z0-9_-]+)$/.test(
+            text(link, 'href'),
+        ),
+    );
+    const navigation = configuredLinks.length
+        ? configuredLinks
+        : sections
+              .slice(1, 4)
+              .map((section) => ({
+                  label: section.name,
+                  href: `#${section.key}`,
+              }));
 
     return (
-        <main className="relative min-h-screen overflow-hidden bg-[#07070a]">
+        <main
+            data-forge-theme={text(page.settings, 'theme', 'forge-dark')}
+            className="relative min-h-screen overflow-hidden bg-[#07070a]"
+        >
             <div className="forge-grid pointer-events-none absolute inset-x-0 top-0 h-[54rem]" />
             <div className="pointer-events-none absolute top-[-15rem] left-1/2 h-[30rem] w-[50rem] -translate-x-1/2 rounded-full bg-forge-600/[0.12] blur-[120px]" />
             <header className="relative z-20 mx-auto flex h-20 max-w-7xl items-center justify-between px-5 sm:px-8">
                 <ForgeLogo />
                 <nav className="hidden items-center gap-7 text-sm text-zinc-500 md:flex">
-                    {sections.slice(1, 4).map((section) => (
+                    {navigation.map((link, index) => (
                         <a
-                            key={section.key}
-                            href={`#${section.key}`}
+                            key={index}
+                            href={text(link, 'href')}
                             className="transition hover:text-white"
                         >
-                            {section.name}
+                            {text(link, 'label')}
                         </a>
                     ))}
                 </nav>
@@ -348,6 +400,14 @@ export function PublicPageRenderer({ page, auth }: PublicPageRendererProps) {
                 initial={reduceMotion ? false : { opacity: 0 }}
                 animate={{ opacity: 1 }}
             >
+                {sections.length === 0 && (
+                    <section className="mx-auto max-w-3xl px-6 py-28 text-center">
+                        <h1 className="text-4xl text-white">{page.title}</h1>
+                        <p className="mt-5 text-zinc-400">
+                            This page is being prepared. Please check back soon.
+                        </p>
+                    </section>
+                )}
                 {sections.map((section) => {
                     if (section.type === 'hero') {
                         return (
@@ -396,7 +456,10 @@ export function PublicPageRenderer({ page, auth }: PublicPageRendererProps) {
                         );
                     }
 
-                    if (section.type === 'rich_text') {
+                    if (
+                        section.type === 'rich_text' ||
+                        section.type === 'custom'
+                    ) {
                         return (
                             <RichTextSection
                                 key={section.key}
@@ -405,13 +468,45 @@ export function PublicPageRenderer({ page, auth }: PublicPageRendererProps) {
                         );
                     }
 
-                    return null;
+                    return (
+                        <section
+                            key={section.key}
+                            id={section.key}
+                            className="mx-auto max-w-6xl px-6 py-20"
+                        >
+                            <SectionHeading content={section.content} />
+                            <div className="mt-8 grid gap-6 sm:grid-cols-3">
+                                {items(section.content, 'items').map(
+                                    (item, i) => (
+                                        <div
+                                            key={i}
+                                            className="forge-card rounded-xl p-6"
+                                        >
+                                            <p className="text-3xl text-forge-300">
+                                                {text(item, 'value')}
+                                            </p>
+                                            <p className="mt-2 text-zinc-400">
+                                                {text(item, 'label')}
+                                            </p>
+                                        </div>
+                                    ),
+                                )}
+                            </div>
+                        </section>
+                    );
                 })}
             </motion.div>
             <footer className="border-t border-white/[0.06] px-5 py-10 text-sm text-zinc-700 sm:px-8">
                 <div className="mx-auto flex max-w-7xl flex-col items-center justify-between gap-5 sm:flex-row">
                     <ForgeLogo />
-                    <p>© {new Date().getFullYear()} GCode Forge Studio</p>
+                    <p>
+                        © {new Date().getFullYear()}{' '}
+                        {text(
+                            page.settings,
+                            'footer_text',
+                            'GCode Forge Studio',
+                        )}
+                    </p>
                     <div className="flex gap-5">
                         <Link href="/terms">Terms</Link>
                         <Link href="/privacy">Privacy</Link>

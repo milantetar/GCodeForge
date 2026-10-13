@@ -19,7 +19,7 @@ class ProjectResource extends JsonResource
             'description' => $this->description,
             'status' => $this->status->value,
             'settings' => $this->settings ?? [],
-            'machine_profile' => new MachineProfileResource($this->whenLoaded('machineProfile')),
+            'machine_profile' => $this->whenLoaded('machineProfile', fn () => $this->machineProfile === null ? null : MachineProfileResource::make($this->machineProfile)->resolve($request)),
             'conversions_count' => $this->whenCounted('conversions'),
             'last_activity_at' => $this->last_activity_at,
             'created_at' => $this->created_at,

@@ -16,7 +16,7 @@ type AuthShellProps = PropsWithChildren<{
 const benefits = [
     { icon: Code2, text: 'Generate production-ready G-code' },
     { icon: ShieldCheck, text: 'Secure workspace and access controls' },
-    { icon: Sparkles, text: 'AI-assisted toolpath intelligence' },
+    { icon: Sparkles, text: 'Repeatable G-code transformations' },
 ];
 
 export function AuthShell({

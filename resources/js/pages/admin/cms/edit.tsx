@@ -15,6 +15,8 @@ import {
 import { useState } from 'react';
 
 import { AppShell } from '@/components/app-shell';
+import { PageSettingsFields } from '@/components/cms/page-settings-fields';
+import { SectionFields } from '@/components/cms/section-fields';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
@@ -39,6 +41,7 @@ type CmsSectionForm = Omit<CmsSection, 'content' | 'settings'> & {
 };
 
 type CmsEditForm = {
+    lock_version: number;
     title: string;
     slug: string;
     type: CmsPageType;
@@ -100,7 +103,17 @@ function JsonEditor({ value, onChange }: JsonEditorProps) {
 }
 
 export default function CmsEdit({ cmsPage }: CmsEditProps) {
+    return (
+        <CmsEditFormPage
+            key={`${cmsPage.id}-${cmsPage.lock_version}`}
+            cmsPage={cmsPage}
+        />
+    );
+}
+
+function CmsEditFormPage({ cmsPage }: CmsEditProps) {
     const form = useForm<CmsEditForm>({
+        lock_version: cmsPage.lock_version ?? 0,
         title: cmsPage.title,
         slug: cmsPage.slug,
         type: cmsPage.type,
@@ -185,7 +198,7 @@ export default function CmsEdit({ cmsPage }: CmsEditProps) {
     const publish = () =>
         router.post(
             `/admin/cms/pages/${cmsPage.id}/publish`,
-            {},
+            { lock_version: cmsPage.lock_version ?? 0 },
             { preserveScroll: true },
         );
 
@@ -198,24 +211,43 @@ export default function CmsEdit({ cmsPage }: CmsEditProps) {
                     <div className="flex gap-2">
                         <Button asChild variant="ghost" size="sm">
                             <a
-                                href={
-                                    cmsPage.slug === 'home'
-                                        ? '/'
-                                        : `/${cmsPage.slug}`
-                                }
+                                href={`/admin/cms/pages/${cmsPage.id}/preview`}
                                 target="_blank"
                                 rel="noreferrer"
                             >
                                 <Eye className="size-4" /> Preview
                             </a>
                         </Button>
-                        <Button size="sm" onClick={publish}>
+                        <Button
+                            size="sm"
+                            onClick={publish}
+                            disabled={form.isDirty || form.processing}
+                            title="Save your changes before publishing"
+                        >
                             <Send className="size-4" /> Publish
                         </Button>
                     </div>
                 }
             >
                 <form onSubmit={save}>
+                    <p className="mb-4 text-sm text-zinc-400">
+                        Save creates a draft; Publish updates the live page.
+                        Preview shows the last saved draft.
+                    </p>
+                    {Object.entries(form.errors).length > 0 && (
+                        <div
+                            role="alert"
+                            className="mb-4 rounded-xl border border-red-400/30 p-4 text-sm text-red-300"
+                        >
+                            {Object.entries(form.errors).map(
+                                ([key, message]) => (
+                                    <p key={key}>
+                                        {key}: {message}
+                                    </p>
+                                ),
+                            )}
+                        </div>
+                    )}
                     <div className="mb-7 flex flex-wrap items-start justify-between gap-4">
                         <div>
                             <Link
@@ -320,6 +352,7 @@ export default function CmsEdit({ cmsPage }: CmsEditProps) {
                                             <select
                                                 className="mt-2 h-11 w-full rounded-xl border border-white/10 bg-black/25 px-3.5 text-sm text-zinc-200"
                                                 value={form.data.status}
+                                                disabled
                                                 onChange={(event) =>
                                                     form.setData(
                                                         'status',
@@ -510,15 +543,29 @@ export default function CmsEdit({ cmsPage }: CmsEditProps) {
                                                     validate on blur
                                                 </span>
                                             </div>
-                                            <JsonEditor
+                                            <SectionFields
+                                                type={section.type}
                                                 value={section.content_json}
-                                                onChange={(contentJson) =>
+                                                onChange={(content_json) =>
                                                     updateSection(index, {
-                                                        content_json:
-                                                            contentJson,
+                                                        content_json,
                                                     })
                                                 }
                                             />
+                                            <details className="mt-4">
+                                                <summary className="cursor-pointer text-sm text-zinc-400">
+                                                    Advanced JSON
+                                                </summary>
+                                                <JsonEditor
+                                                    value={section.content_json}
+                                                    onChange={(contentJson) =>
+                                                        updateSection(index, {
+                                                            content_json:
+                                                                contentJson,
+                                                        })
+                                                    }
+                                                />
+                                            </details>
                                         </div>
                                     </CardContent>
                                 </Card>
@@ -526,6 +573,19 @@ export default function CmsEdit({ cmsPage }: CmsEditProps) {
                         </div>
 
                         <aside className="space-y-5 xl:sticky xl:top-24 xl:h-fit">
+                            <Card>
+                                <CardContent>
+                                    <h3 className="mb-5 font-medium text-zinc-100">
+                                        Page appearance & navigation
+                                    </h3>
+                                    <PageSettingsFields
+                                        value={form.data.settings_json}
+                                        onChange={(value) =>
+                                            form.setData('settings_json', value)
+                                        }
+                                    />
+                                </CardContent>
+                            </Card>
                             <Card>
                                 <CardContent>
                                     <h3 className="font-medium text-zinc-100">
@@ -596,6 +656,33 @@ export default function CmsEdit({ cmsPage }: CmsEditProps) {
                                                             {revision.change_note ??
                                                                 'Saved revision'}
                                                         </p>
+                                                        <Button
+                                                            type="button"
+                                                            size="sm"
+                                                            variant="ghost"
+                                                            disabled={
+                                                                form.isDirty ||
+                                                                form.processing
+                                                            }
+                                                            onClick={() =>
+                                                                window.confirm(
+                                                                    'Restore this revision as a draft?',
+                                                                ) &&
+                                                                router.post(
+                                                                    `/admin/cms/pages/${cmsPage.id}/revisions/${revision.id}/restore`,
+                                                                    {
+                                                                        lock_version:
+                                                                            cmsPage.lock_version ??
+                                                                            0,
+                                                                    },
+                                                                    {
+                                                                        preserveScroll: true,
+                                                                    },
+                                                                )
+                                                            }
+                                                        >
+                                                            Restore draft
+                                                        </Button>
                                                         <p className="mt-1 text-[10px] text-zinc-700">
                                                             {new Date(
                                                                 revision.created_at,
