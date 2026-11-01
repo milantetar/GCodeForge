@@ -28,6 +28,10 @@ and a production asset build are used for the handoff.
 > output, verify units and coordinate systems, confirm machine limits, and perform
 > a controlled dry run before production use.
 
+## Preview
+
+![GCode Forge Studio homepage](docs/screenshots/homepage.png)
+
 ## Contents
 
 - [Product scope](#product-scope)
